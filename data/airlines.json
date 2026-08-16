@@ -1,0 +1,154 @@
+{
+  "airlines": [
+    {
+      "code": "BA",
+      "name": "British Airways",
+      "primary_color": "#075AAA",
+      "secondary_color": "#EB2226",
+      "text_color": "#1B1B1B",
+      "template": "british_airways",
+      "terminals": {
+        "LHR": "5",
+        "LGW": "S",
+        "CDG": "2A",
+        "AMS": "3",
+        "FRA": "1"
+      },
+      "prefix": "125"
+    },
+    {
+      "code": "LH",
+      "name": "Lufthansa",
+      "primary_color": "#05164D",
+      "secondary_color": "#FFC72C",
+      "text_color": "#1A1A1A",
+      "template": "lufthansa",
+      "terminals": {
+        "LHR": "2",
+        "FRA": "1",
+        "MUC": "2"
+      },
+      "prefix": "220"
+    },
+    {
+      "code": "KL",
+      "name": "KLM Royal Dutch Airlines",
+      "primary_color": "#00A1DE",
+      "secondary_color": "#003145",
+      "text_color": "#1A1A1A",
+      "template": "klm",
+      "terminals": {
+        "LHR": "4",
+        "AMS": "2"
+      },
+      "prefix": "074"
+    },
+    {
+      "code": "AF",
+      "name": "Air France",
+      "primary_color": "#002157",
+      "secondary_color": "#E4002B",
+      "text_color": "#1A1A1A",
+      "template": "air_france",
+      "terminals": {
+        "LHR": "4",
+        "CDG": "2F"
+      },
+      "prefix": "057"
+    },
+    {
+      "code": "LX",
+      "name": "Swiss International Air Lines",
+      "primary_color": "#D52B1E",
+      "secondary_color": "#1A1A1A",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LHR": "2",
+        "ZRH": "E"
+      },
+      "prefix": "724"
+    },
+    {
+      "code": "OS",
+      "name": "Austrian Airlines",
+      "primary_color": "#E20A16",
+      "secondary_color": "#1A1A1A",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LHR": "2",
+        "VIE": "3"
+      },
+      "prefix": "257"
+    },
+    {
+      "code": "SK",
+      "name": "Scandinavian Airlines",
+      "primary_color": "#000066",
+      "secondary_color": "#C4C4C4",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LHR": "2",
+        "CPH": "3",
+        "ARN": "5"
+      },
+      "prefix": "117"
+    },
+    {
+      "code": "TP",
+      "name": "TAP Air Portugal",
+      "primary_color": "#00965E",
+      "secondary_color": "#E20612",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LHR": "3",
+        "LGW": "S",
+        "LIS": "1"
+      },
+      "prefix": "047"
+    },
+    {
+      "code": "IB",
+      "name": "Iberia",
+      "primary_color": "#D7192D",
+      "secondary_color": "#FDB813",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LHR": "5",
+        "MAD": "4"
+      },
+      "prefix": "075"
+    },
+    {
+      "code": "FR",
+      "name": "Ryanair",
+      "primary_color": "#073590",
+      "secondary_color": "#F5C518",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "STN": "1",
+        "LTN": "1"
+      },
+      "prefix": "224"
+    },
+    {
+      "code": "U2",
+      "name": "easyJet",
+      "primary_color": "#FF6600",
+      "secondary_color": "#FFFFFF",
+      "text_color": "#1A1A1A",
+      "template": "generic",
+      "terminals": {
+        "LGW": "N",
+        "LTN": "1",
+        "STN": "1"
+      },
+      "prefix": "922"
+    }
+  ]
+}
