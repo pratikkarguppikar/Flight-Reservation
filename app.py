@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import streamlit as st
+import pandas as pd
 from datetime import date, datetime, timedelta
 
 from models.booking import Booking, FlightSegment, Passenger
@@ -51,6 +52,7 @@ _DEFAULTS = {
     "flight_source": "local",
     "was_return": False,
     "generated": None,
+    "search_nonce": 0,
 }
 for _k, _v in _DEFAULTS.items():
     st.session_state.setdefault(_k, _v)
@@ -96,6 +98,8 @@ def _reset_selection():
     st.session_state.selected_flight = None
     st.session_state.selected_return_flight = None
     st.session_state.generated = None
+    for _k in ("change_out", "change_ret"):
+        st.session_state[_k] = False
 
 
 def _to_segment(flight):
@@ -126,36 +130,89 @@ def _currency_symbol(cur):
     return {"GBP": "£", "EUR": "€", "USD": "$"}.get(cur, f"{cur} ")
 
 
-def render_flight_list(results, kind):
-    """Render selectable flight cards. kind is 'out' or 'ret'."""
-    state_key = "selected_flight" if kind == "out" else "selected_return_flight"
-    selected = st.session_state.get(state_key)
-    sel_key = _flight_key(selected) if selected else None
+def _render_selected_card(f):
+    """Compact, highlighted summary of the chosen flight."""
+    sym = _currency_symbol(f.currency)
+    stop_icon = "🟢" if f.stops == 0 else "🟡"
+    stop = "Direct" if f.stops == 0 else f.stops_display
+    aircraft = f.aircraft_type or "Aircraft to be confirmed"
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([3, 2, 1.4])
+        with c1:
+            st.markdown(f"**{f.airline_name}** · {f.flight_number}")
+            st.caption(f"{f.departure_airport} → {f.arrival_airport} · {aircraft}")
+        with c2:
+            st.markdown(f"**{f.departure_datetime.strftime('%H:%M')} → {f.arrival_datetime.strftime('%H:%M')}**")
+            st.caption(f"{f.departure_datetime.strftime('%a %d %b')} · {f.duration_display} · {stop_icon} {stop}")
+        with c3:
+            st.markdown(f"### {sym}{f.price:.0f}")
+            st.caption(f.cabin_class)
 
-    for idx, f in enumerate(results):
-        is_sel = sel_key == _flight_key(f)
+
+def _flights_dataframe(results):
+    """Build a tidy table of flight options for display."""
+    rows = []
+    for f in results:
         sym = _currency_symbol(f.currency)
-        with st.container(border=True):
-            c1, c2, c3, c4, c5 = st.columns([2.2, 2.2, 1.8, 1.3, 1.4])
-            with c1:
-                st.markdown(f"**{f.airline_name}**")
-                st.caption(f"{f.flight_number} · {f.aircraft_type or '—'}")
-            with c2:
-                st.markdown(f"**{f.departure_datetime.strftime('%H:%M')}** → **{f.arrival_datetime.strftime('%H:%M')}**")
-                st.caption(f"{f.departure_airport} → {f.arrival_airport} · {f.departure_datetime.strftime('%d %b')}")
-            with c3:
-                st.markdown(f.duration_display)
-                st.caption(("🟢 " if f.stops == 0 else "🟡 ") + f.stops_display)
-            with c4:
-                st.markdown(f"**{sym}{f.price:.0f}**")
-                st.caption(f.cabin_class)
-            with c5:
-                if is_sel:
-                    st.button("✅ Selected", key=f"{kind}_{idx}", disabled=True, use_container_width=True)
-                elif st.button("Select", key=f"{kind}_{idx}", use_container_width=True):
-                    st.session_state[state_key] = f
-                    st.session_state.generated = None
-                    st.rerun()
+        rows.append({
+            "Airline": f.airline_name,
+            "Flight": f.flight_number,
+            "Depart": f.departure_datetime.strftime("%H:%M"),
+            "Arrive": f.arrival_datetime.strftime("%H:%M"),
+            "Duration": f.duration_display,
+            "Stops": "Direct" if f.stops == 0 else f.stops_display,
+            "Price": f"{sym}{f.price:.0f}",
+        })
+    return pd.DataFrame(rows)
+
+
+def render_flight_list(results, kind):
+    """Render flights as an interactive table. kind is 'out' or 'ret'.
+
+    Once a flight is selected the table collapses to a compact summary card;
+    a "Change flight" button re-opens the table to pick a different flight.
+    """
+    state_key = "selected_flight" if kind == "out" else "selected_return_flight"
+    change_key = f"change_{kind}"
+    tnonce_key = f"tnonce_{kind}"
+    st.session_state.setdefault(change_key, False)
+    st.session_state.setdefault(tnonce_key, 0)
+
+    selected = st.session_state.get(state_key)
+    cur_key = _flight_key(selected) if selected else None
+
+    # Collapsed view — show the chosen flight and a way to change it.
+    if selected and not st.session_state[change_key]:
+        _render_selected_card(selected)
+        if st.button("✏️ Change flight", key=f"change_btn_{kind}_{st.session_state.search_nonce}"):
+            st.session_state[change_key] = True
+            st.session_state[tnonce_key] += 1  # fresh table so nothing is pre-selected
+            st.rerun()
+        return
+
+    # Expanded view — the selectable table.
+    st.caption("Click a row to select your flight.")
+    event = st.dataframe(
+        _flights_dataframe(results),
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"table_{kind}_{st.session_state.search_nonce}_{st.session_state[tnonce_key]}",
+        column_config={
+            "Airline": st.column_config.TextColumn(width="medium"),
+            "Price": st.column_config.TextColumn(width="small"),
+        },
+    )
+
+    sel_rows = event.selection.rows if event and event.selection else []
+    if sel_rows:
+        chosen = results[sel_rows[0]]
+        if cur_key != _flight_key(chosen):
+            st.session_state.generated = None
+        st.session_state[state_key] = chosen
+        st.session_state[change_key] = False  # collapse now that a choice is made
+        st.rerun()
 
 
 # =============================================================================
@@ -181,16 +238,25 @@ is_return = trip_type == "Return"
 
 origin_display = [airport_code_to_key[c] for c in get_origins() if c in airport_code_to_key]
 
+
+def _default_index(options, preferred_code):
+    """Index of a preferred airport in a display-option list, else 0."""
+    key = airport_code_to_key.get(preferred_code)
+    return options.index(key) if key in options else 0
+
+
 with st.container(border=True):
     r1, r2 = st.columns(2)
     with r1:
-        search_from = st.selectbox("✈️ From", options=origin_display, index=0, key="search_from")
+        search_from = st.selectbox("✈️ From", options=origin_display,
+                                   index=_default_index(origin_display, "LHR"), key="search_from")
         from_code = airport_options[search_from]["code"]
     with r2:
         dest_codes = get_destinations_from(from_code)
         dest_display = [airport_code_to_key[c] for c in dest_codes if c in airport_code_to_key]
         options_to = dest_display or list(airport_options.keys())
-        search_to = st.selectbox("🛬 To", options=options_to, index=0, key="search_to")
+        search_to = st.selectbox("🛬 To", options=options_to,
+                                 index=_default_index(options_to, "CDG"), key="search_to")
         to_code = airport_options[search_to]["code"]
 
     if is_return:
@@ -211,6 +277,7 @@ if st.button("🔎 Search flights", type="primary", use_container_width=True):
         st.error("Return date can't be before the departure date.")
     else:
         _reset_selection()
+        st.session_state.search_nonce += 1
         with st.spinner("Searching for flights…"):
             out_results, source = fetch_flights(from_code, to_code, dep_date)
             out_results = _dedupe(out_results)

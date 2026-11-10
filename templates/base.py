@@ -13,7 +13,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm, cm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    Image, HRFlowable, PageBreak, Flowable
+    Image, HRFlowable, PageBreak, Flowable, KeepTogether
 )
 from reportlab.pdfgen import canvas
 
@@ -53,7 +53,7 @@ class BaseTemplate(ABC):
     PRIMARY_COLOR: tuple = (0.03, 0.35, 0.67)  # RGB 0-1
     SECONDARY_COLOR: tuple = (0.92, 0.13, 0.15)
     HEADER_BG: tuple = (0.03, 0.35, 0.67)
-    PAGE_MARGINS = (15 * mm, 15 * mm, 15 * mm, 15 * mm)  # L, R, T, B
+    PAGE_MARGINS = (15 * mm, 15 * mm, 12 * mm, 12 * mm)  # L, R, T, B
 
     def __init__(self):
         self.styles = getSampleStyleSheet()
@@ -185,22 +185,22 @@ class BaseTemplate(ABC):
 
         story = []
         story.extend(self._build_header(booking))
-        story.append(Spacer(1, 6 * mm))
+        story.append(Spacer(1, 4 * mm))
         story.extend(self._build_booking_summary(booking))
-        story.append(Spacer(1, 6 * mm))
+        story.append(Spacer(1, 4 * mm))
 
         for i, segment in enumerate(booking.segments):
             label = "OUTBOUND FLIGHT" if i == 0 else "RETURN FLIGHT"
-            story.extend(self._build_flight_segment(segment, label))
-            story.append(Spacer(1, 6 * mm))
+            story.append(KeepTogether(self._build_flight_segment(segment, label)))
+            story.append(Spacer(1, 4 * mm))
 
-        story.extend(self._build_passenger_details(booking))
-        story.append(Spacer(1, 6 * mm))
-        story.extend(self._build_payment_summary(booking))
-        story.append(Spacer(1, 8 * mm))
-        story.extend(self._build_important_info(booking))
-        story.append(Spacer(1, 6 * mm))
-        story.extend(self._build_barcode_footer(booking))
+        story.append(KeepTogether(self._build_passenger_details(booking)))
+        story.append(Spacer(1, 4 * mm))
+        story.append(KeepTogether(self._build_payment_summary(booking)))
+        story.append(Spacer(1, 4 * mm))
+        story.append(KeepTogether(self._build_important_info(booking)))
+        story.append(Spacer(1, 4 * mm))
+        story.append(KeepTogether(self._build_barcode_footer(booking)))
 
         doc.build(story)
         buffer.seek(0)

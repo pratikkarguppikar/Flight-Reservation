@@ -1,5 +1,7 @@
 """Local flight schedule database — real flight numbers and times, no API needed."""
 
+import math
+import random
 from dataclasses import dataclass
 from datetime import datetime, date, time, timedelta
 from typing import Optional
@@ -391,10 +393,181 @@ ROUTE_CATEGORIES = {
 }
 
 
+# =============================================================================
+# Synthetic route engine — generates realistic flights for ANY airport pair
+# so the portal isn't limited to the curated schedules above.
+# =============================================================================
+
+# Approximate airport coordinates (lat, lon) for duration/distance estimates.
+AIRPORT_COORDS = {
+    # UK & Ireland
+    "LHR": (51.4700, -0.4543), "LGW": (51.1537, -0.1821), "STN": (51.8850, 0.2389),
+    "LTN": (51.8747, -0.3683), "LCY": (51.5053, 0.0553), "MAN": (53.3537, -2.2750),
+    "EDI": (55.9500, -3.3725), "BHX": (52.4539, -1.7480), "BRS": (51.3827, -2.7191),
+    "GLA": (55.8719, -4.4331), "DUB": (53.4213, -6.2701),
+    # Continental Europe
+    "CDG": (49.0097, 2.5479), "ORY": (48.7233, 2.3794), "AMS": (52.3105, 4.7683),
+    "FRA": (50.0379, 8.5622), "MUC": (48.3538, 11.7861), "FCO": (41.8003, 12.2389),
+    "FLR": (43.8100, 11.2051), "MXP": (45.6306, 8.7281), "VCE": (45.5053, 12.3519),
+    "NAP": (40.8860, 14.2908), "MAD": (40.4719, -3.5626), "BCN": (41.2974, 2.0833),
+    "VIE": (48.1103, 16.5697), "ZRH": (47.4647, 8.5492), "CPH": (55.6180, 12.6560),
+    "OSL": (60.1939, 11.1004), "ARN": (59.6519, 17.9186), "LIS": (38.7742, -9.1342),
+    "BRU": (50.9014, 4.4844), "ATH": (37.9364, 23.9445), "PRG": (50.1008, 14.2600),
+    "WAW": (52.1657, 20.9671), "HEL": (60.3172, 24.9633), "GVA": (46.2381, 6.1089),
+    "NCE": (43.6584, 7.2159), "DUS": (51.2895, 6.7668), "HAM": (53.6304, 9.9882),
+    "BUD": (47.4369, 19.2556),
+}
+
+# Standard UTC offsets (hours). DST cancels out in route-pair differences.
+AIRPORT_TZ = {
+    "LHR": 0, "LGW": 0, "STN": 0, "LTN": 0, "LCY": 0, "MAN": 0, "EDI": 0,
+    "BHX": 0, "BRS": 0, "GLA": 0, "DUB": 0, "LIS": 0,
+    "ATH": 2, "HEL": 2,
+}
+
+# Airline hub/base airports used to decide who plausibly operates a route.
+AIRLINE_NETWORKS = {
+    "BA": ["LHR", "LGW", "LCY"],
+    "LH": ["FRA", "MUC"],
+    "AF": ["CDG", "ORY"],
+    "KL": ["AMS"],
+    "LX": ["ZRH", "GVA"],
+    "OS": ["VIE"],
+    "SK": ["CPH", "ARN", "OSL"],
+    "TP": ["LIS"],
+    "IB": ["MAD", "BCN"],
+    "FR": ["STN", "LTN", "DUB", "BHX", "BRS"],
+    "U2": ["LGW", "LTN", "STN", "MAN", "EDI", "BRS", "GLA"],
+}
+
+AIRLINE_NAMES = {
+    "BA": "British Airways", "LH": "Lufthansa", "KL": "KLM Royal Dutch Airlines",
+    "AF": "Air France", "LX": "Swiss International Air Lines", "OS": "Austrian Airlines",
+    "SK": "Scandinavian Airlines", "TP": "TAP Air Portugal", "IB": "Iberia",
+    "FR": "Ryanair", "U2": "easyJet",
+}
+
+# Broad-network carriers used as a fallback when no airline is hubbed at either end.
+_FALLBACK_CARRIERS = ["BA", "LH", "AF", "KL"]
+
+_DEP_SLOTS = ["06:35", "08:50", "11:20", "13:55", "16:40", "19:25", "21:10"]
+
+
+def _haversine_km(origin: str, destination: str) -> Optional[float]:
+    """Great-circle distance in km between two known airports."""
+    a = AIRPORT_COORDS.get(origin)
+    b = AIRPORT_COORDS.get(destination)
+    if not a or not b:
+        return None
+    lat1, lon1, lat2, lon2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(h))
+
+
+def _route_duration_minutes(origin: str, destination: str) -> int:
+    """Estimate block time (minutes) from distance, with taxi/climb overhead."""
+    km = _haversine_km(origin, destination)
+    if km is None:
+        km = 1000.0
+    return int(round(40 + km / 12.0))
+
+
+def _route_category(origin: str, destination: str) -> str:
+    """Distance-based price category for routes not in ROUTE_CATEGORIES."""
+    if (origin, destination) in ROUTE_CATEGORIES:
+        return ROUTE_CATEGORIES[(origin, destination)]
+    km = _haversine_km(origin, destination)
+    if km is None:
+        return "medium"
+    if km < 900:
+        return "short"
+    if km < 1600:
+        return "medium"
+    return "long"
+
+
+def _operating_airlines(origin: str, destination: str) -> list[str]:
+    """Airlines that plausibly operate a route: those hubbed at either end,
+    topped up with broad-network carriers so every pair has options."""
+    carriers: list[str] = []
+    for code, hubs in AIRLINE_NETWORKS.items():
+        if origin in hubs or destination in hubs:
+            carriers.append(code)
+    for code in _FALLBACK_CARRIERS:
+        if len(carriers) >= 2:
+            break
+        if code not in carriers:
+            carriers.append(code)
+    return carriers[:4]
+
+
+def _aircraft_for(airline_code: str, duration_minutes: int, rng: random.Random) -> str:
+    """Pick a plausible narrowbody for the carrier and sector length."""
+    if airline_code == "FR":
+        return "Boeing 737-800"
+    if airline_code == "U2":
+        return rng.choice(["Airbus A320", "Airbus A320neo", "Airbus A319"])
+    if duration_minutes <= 90:
+        pool = ["Airbus A319", "Airbus A320", "Embraer E190"]
+    elif duration_minutes <= 150:
+        pool = ["Airbus A320", "Airbus A320neo", "Airbus A321"]
+    else:
+        pool = ["Airbus A321", "Airbus A320neo", "Boeing 737-800"]
+    return rng.choice(pool)
+
+
+def _synth_flights(origin: str, destination: str, departure_date: date) -> list[FlightResult]:
+    """Generate deterministic, realistic-looking flights for any airport pair."""
+    from generators.pdf_generator import get_terminal_for_airport
+
+    duration_minutes = _route_duration_minutes(origin, destination)
+    hours, minutes = divmod(duration_minutes, 60)
+    duration_iso = f"PT{hours}H{minutes}M"
+    tz_diff = AIRPORT_TZ.get(destination, 1) - AIRPORT_TZ.get(origin, 1)
+
+    carriers = _operating_airlines(origin, destination)
+    results: list[FlightResult] = []
+    slot_idx = 0
+    for ci, code in enumerate(carriers):
+        n_flights = 3 if ci == 0 else 2
+        for k in range(n_flights):
+            if slot_idx >= len(_DEP_SLOTS):
+                break
+            dep_str = _DEP_SLOTS[slot_idx]
+            slot_idx += 1
+
+            rng = random.Random(hash(f"{code}{origin}{destination}{k}") % (2 ** 31))
+            dep_t = datetime.strptime(dep_str, "%H:%M").time()
+            dep_dt = datetime.combine(departure_date, dep_t)
+            arr_dt = dep_dt + timedelta(minutes=duration_minutes) + timedelta(hours=tz_diff)
+
+            results.append(FlightResult(
+                airline_code=code,
+                airline_name=AIRLINE_NAMES.get(code, code),
+                flight_number=f"{code}{rng.randint(100, 998)}",
+                departure_airport=origin,
+                arrival_airport=destination,
+                departure_datetime=dep_dt,
+                arrival_datetime=arr_dt,
+                duration=duration_iso,
+                stops=0,
+                cabin_class="Economy",
+                price=_get_price(origin, destination, code),
+                currency="GBP",
+                aircraft_type=_aircraft_for(code, duration_minutes, rng),
+                departure_terminal=get_terminal_for_airport(code, origin),
+                arrival_terminal=get_terminal_for_airport(code, destination),
+                booking_class="Y",
+            ))
+    results.sort(key=lambda r: r.departure_datetime)
+    return results
+
+
 def _get_price(dep: str, arr: str, airline_code: str) -> float:
     """Generate a realistic price based on route and airline."""
     import random
-    category = ROUTE_CATEGORIES.get((dep, arr), "medium")
+    category = _route_category(dep, arr)
     low, high = PRICE_RANGES[category]
 
     # Budget carriers are cheaper
@@ -489,6 +662,8 @@ def search_local_flights(
         ))
 
     # Sort by departure time
+    if not results:
+        results = _synth_flights(origin, destination, departure_date)
     results.sort(key=lambda r: r.departure_datetime)
     return results
 
@@ -502,10 +677,10 @@ def get_available_routes() -> list[tuple[str, str]]:
 
 
 def get_origins() -> list[str]:
-    """Get all unique departure airports."""
-    return sorted(set(s[3] for s in FLIGHT_SCHEDULES))
+    """Get all selectable departure airports (every known airport)."""
+    return sorted(AIRPORT_COORDS.keys())
 
 
 def get_destinations_from(origin: str) -> list[str]:
-    """Get all destinations reachable from a given origin."""
-    return sorted(set(s[4] for s in FLIGHT_SCHEDULES if s[3] == origin))
+    """Get all destinations reachable from a given origin (any other airport)."""
+    return sorted(code for code in AIRPORT_COORDS if code != origin)
